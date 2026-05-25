@@ -1,0 +1,15 @@
+[Unit]
+Description=zram-backed compressed swap
+DefaultDependencies=no
+Before=swap.target
+After=local-fs.target
+ConditionPathExists=/sys/block/zram0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zram-setup.sh
+ExecStop=/sbin/swapoff /dev/zram0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=swap.target

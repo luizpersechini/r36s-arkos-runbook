@@ -1,0 +1,30 @@
+# Never commit ROMs or BIOS
+*.chd
+*.pbp
+*.iso
+*.bin
+*.cue
+*.7z
+*.zip
+*.rom
+*.nes
+*.smc
+*.sfc
+*.gba
+*.gb
+*.gbc
+*.n64
+*.z64
+*.mdf
+*.bms
+# (*.md removed: would block README.md; Megadrive ROMs covered by ext below)
+*.gg
+*.sms
+scph*.bin
+ps_bios*
+
+# OS junk
+.DS_Store
+*.bak-*
+*.gen
+*.smd
