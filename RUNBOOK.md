@@ -20,6 +20,7 @@ This document is an operational runbook for an AI assistant helping a user set u
 3. Samba authentication for the `ark` user is broken (`ark/ark` fails). Guest is read-only. For writes use Filebrowser API or SSH/scp.
 4. Filebrowser at `http://<ip>/` runs as **root**, has `EnableExec=true` (version 2.30.0), and the default `ark/ark` login is admin within Filebrowser. This is the universal root escape hatch when SSH won't start.
 5. R36S USB-C OTG port can do peripheral mode (UDC `ff300000.usb` present, `USB_DWC2_DUAL_ROLE=y`), but **the kernel lacks `USB_CONFIGFS_ECM` and `_NCM`** — only RNDIS is compiled in. macOS doesn't support RNDIS natively. Native ethernet-over-USB to a Mac requires a kernel rebuild. Don't promise it.
+6. **`%GOVERNOR%` template variable is empty by default.** Every `<command>` in `/etc/emulationstation/es_systems.cfg` starts with `sudo perfmax %GOVERNOR% %ROM%`, but ArkOS sets no value for `%GOVERNOR%` anywhere — neither global default nor per-game. The substitution resolves to empty string, `perfmax` runs without a real arg, and CPU stays on `interactive` governor (lazy scaling) during games instead of `performance` (locked max). For PSP / N64, this is ~15–25% of available clock effectively unused. Fix by hardcoding `performance` for the heavy systems (see Phase 4 Tier 2).
 
 ## 2. Quick reference
 
@@ -245,9 +246,26 @@ After deletion, gamelist.xml entries for deleted files become stale and Emulatio
    - `LocalArt` (filesystem scans)
    - `PreloadUI` (boot RAM)
 
+### Tier 1.5 (kernel memory tuning, low risk — apply once)
+
+Drop `scripts/99-r36s-perf.conf` into `/etc/sysctl.d/`. Settings:
+
+- `vm.swappiness = 100` (default 60 — too conservative; we want zram used before OOM)
+- `vm.vfs_cache_pressure = 200` (drop dentries/inodes faster under pressure)
+- `vm.overcommit_memory = 1` (allow overcommit — emulators sometimes ask big and use small)
+- `vm.dirty_background_ratio = 5`, `vm.dirty_ratio = 10` (flush dirty pages eagerly, less held in RAM)
+
+Apply: `sudo sysctl -p /etc/sysctl.d/99-r36s-perf.conf`. Persists across reboots automatically.
+
+Pair with the zram bump (768 MB or higher — edit `scripts/zram-setup.sh`). Combined effect: meaningful resistance to mid-game OOM crashes especially for PSP titles.
+
 ### Tier 2 (in-place, low risk)
 
-1. **CPU/GPU governor switching** — already wired into ArkOS. Every game launch in `/etc/emulationstation/es_systems.cfg` is wrapped: `sudo perfmax %GOVERNOR% %ROM%; ...; sudo perfnorm`. `perfmax` switches CPU/GPU/DMC governors based on the per-system `%GOVERNOR%` variable. **Do not write your own — it's already there.** If you do need to tune, the script is at `/usr/local/bin/perfmax`.
+1. **CPU/GPU governor switching** — wired into ArkOS via `perfmax`, but **the `%GOVERNOR%` template variable is empty by default** (see Critical Knowledge §6). Fix for the systems where it matters by replacing `%GOVERNOR%` with literal `performance` in `es_systems.cfg`:
+   ```xml
+   <command>sudo perfmax performance %ROM%; nice -n -19 .../emulator.sh; sudo perfnorm</command>
+   ```
+   Recommended for PSP, N64, Dreamcast, possibly Saturn. Don't touch lightweight systems (NES, GBA) — interactive governor saves battery there without perceptible perf loss.
 2. **RetroArch global tweaks** — edit `/home/ark/.config/retroarch/retroarch.cfg`:
    - `video_shader_enable = "false"` ← this is the big one. Shaders cost 30–50% perf on Mali-G31.
    - Most other settings already sane in the CHIMOD ship config (rewind off, runahead off, video_smooth off, threaded on, vsync on).
@@ -257,11 +275,29 @@ After deletion, gamelist.xml entries for deleted files become stale and Emulatio
    - (no flag) → just `clear > /dev/tty1` ← lightest, no overhead
      The Options menu has "Set Launchimage to ascii or pic.sh" which replaces perfmax with a heavier variant. **Skip this unless the user specifically wants a launch image.** Default no-flag state is fastest.
 
-### Tier 3 (invasive, skip unless asked)
+### Tier 2.5 (per-emulator wrapper for memory + service control)
 
-- Kernel overclock — RK3326S can be pushed to ~1.5 GHz CPU + 600 MHz GPU. Requires flashing custom kernel. Real gain ~15–20%; real risk of bricking + thermal throttling. Don't do this casually.
+For PSP especially, wrap the emulator invocation in a script that stops Samba/Filebrowser (~50 MB freed) and drops disk caches before launch. See `scripts/psp-perf-launch.sh` in this repo. Wire into `es_systems.cfg`:
+
+```xml
+<command>sudo perfmax performance %ROM%; nice -n -19 /usr/local/bin/psp-perf-launch.sh %EMULATOR% %ROM%; sudo perfnorm</command>
+```
+
+Leaves SSH running. Restarts the stopped services on game exit. Filebrowser stays dead — user re-enables via the on-device "Enable Remote Services" menu when needed.
+
+### Tier 3 (firmware switch — skip stock ArkOS)
+
+If Tier 1+2 still isn't enough, the next step is moving off stock ArkOS. See `docs/FIRMWARE_SWITCH.md` for full migration. Short version: **AeolusUX ArkOS R3XS** is the right pick — same ArkOS workflow you know, plus a built-in **ArkManager** UI tool for CPU/GPU/zram tuning, and community-validated overclock voltage tables. SD card swap, your original card stays as recovery.
+
+### Tier 4 (invasive, skip unless you really know what you're doing)
+
+- Custom kernel overclock — RK3326S can be pushed to ~1.5 GHz CPU + 600 MHz GPU. Requires flashing custom kernel + dtb voltage table tuning. Real gain ~15–20%; real risk of bricking + thermal throttling. **Use AeolusUX R3XS first — it packages this same overclock with a UI.**
 - Lighter front-end (Pegasus etc.) — ES isn't running during games so the gain is small.
-- `journald` to volatile — `/etc/systemd/journald.conf` → `Storage=volatile`. Reduces SD card wear.
+- `journald` to volatile — `/etc/systemd/journald.conf` → `Storage=volatile`. Reduces SD card wear; takes effect next reboot.
+
+### PSP-specific (the deep cut)
+
+See `docs/PSP_GOW_OPTIMIZATION.md` for the full layered approach used to push God of War: Chains of Olympus from 15 fps unplayable to ~30 fps stable on R36S. Covers the CWCheat 30 FPS lock, PPSSPP per-game config conventions, memory pressure mitigation, and the `DisableSlowFramebufEffects` artifact bug.
 
 ## 7. Phase 5 — Multi-disc PSX (FF7, Chrono Cross, etc.)
 
@@ -363,6 +399,9 @@ Use the **EmulationStation built-in scraper** instead — Main Menu → SCRAPER.
 - **Don't trust "Set Launchimage to ascii or pic.sh"** as a perf fix — it makes things slightly worse than the default no-flag state.
 - **Don't assume the smb password matches the Linux password.** Samba on this build allows guest read-only; user-authenticated SMB is broken with default creds. Use Filebrowser API or run `sudo smbpasswd -a ark` to set a Samba password explicitly.
 - **Don't use the .nv/.state/.srm extension prefix when matching ROM duplicates** — they're saves, not ROMs.
+- **Don't set `MaxVRAM` to 1000 expecting better game perf.** It's only EmulationStation's UI texture cache — bigger value means more memory pressure when emulators launch, not faster games. 256–512 MB is the sane range.
+- **Don't trust ArkOS's `%GOVERNOR%` template var to do anything.** No source ever sets it; perfmax gets empty arg and falls through. Hardcode `performance` for the systems you care about.
+- **Don't enable `DisableSlowFramebufEffects=True` in PPSSPP** — it's a perf trick that breaks GoW orbs/arrows, FF series particles, and many other games' framebuffer-dependent effects. The ~5% perf gain isn't worth the visual breakage.
 
 ## 11. Memory file recommendation
 

@@ -7,6 +7,8 @@ If you have the same device and you're stuck on "Network Settings doesn't exist"
 ## What's in here
 
 - **[RUNBOOK.md](RUNBOOK.md)** — the operational document. Written so an LLM (or a human) can follow it end-to-end without re-discovering the dead ends.
+- **[docs/PSP_GOW_OPTIMIZATION.md](docs/PSP_GOW_OPTIMIZATION.md)** — layered PSP perf guide. The fix for God of War: Chains of Olympus and friends. Covers CWCheat 30 fps lock, the `%GOVERNOR%` empty-template bug, memory pressure mitigation.
+- **[docs/FIRMWARE_SWITCH.md](docs/FIRMWARE_SWITCH.md)** — when to switch from stock ArkOS to AeolusUX R3XS / ROCKNIX / muOS, and how. Recommends R3XS for most users.
 - **[scripts/](scripts/)** — the helper scripts referenced by the runbook, ready to use.
 
 ## Why this exists
